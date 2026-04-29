@@ -1,0 +1,70 @@
+name: Build OnePlus 7 Kernel (KSU + APatch Ready)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Maximize space
+      uses: easimon/maximize-build-space@master
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git bc bison build-essential flex \
+        libssl-dev libelf-dev clang lld llvm zip
+
+    - name: Clone kernel source
+      run: |
+        git clone --depth=1 https://github.com/QuinceROMs/android_kernel_oneplus_sm8150.git kernel
+        cd kernel
+
+    - name: Setup KernelSU
+      run: |
+        cd kernel
+        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
+
+    - name: Build kernel
+      run: |
+        cd kernel
+
+        export ARCH=arm64
+        export SUBARCH=arm64
+
+        make O=out vendor/sm8150-perf_defconfig
+
+        # FORCE configs (important)
+        scripts/config --file out/.config \
+          -e KPROBES \
+          -e KPROBE_EVENTS \
+          -e KRETPROBES \
+          -e KALLSYMS \
+          -e KALLSYMS_ALL \
+          -e DEBUG_INFO \
+          -e DEBUG_KERNEL \
+          -d DEBUG_INFO_REDUCED \
+          -d LTO_CLANG \
+          -d CFI_CLANG
+
+        make O=out olddefconfig
+
+        make O=out -j$(nproc) \
+          CC=clang LLVM=1 LLVM_IAS=1
+
+    - name: Pack kernel
+      run: |
+        cd kernel
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+        cp out/arch/arm64/boot/Image* anykernel/
+
+        cd anykernel
+        zip -r9 ../kernel.zip *
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel
+        path: kernel/kernel.zip
